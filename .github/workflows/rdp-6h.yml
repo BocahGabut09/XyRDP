@@ -104,6 +104,8 @@ name: RdpFree — RDP 6 Jam
         - windows-2022
         - windows-2025
         - windows-latest
+        - Debian
+        - Ubuntu
       microphone:
         description: Izinkan input mikrofon melalui kanal RDP (klien tetap meminta izin Android)
         required: false
