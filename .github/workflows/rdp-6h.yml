@@ -1,23 +1,15 @@
-name: RdpFree — Windows/Linux RDP
+# .github/workflows/rdpfree.yml
+name: RdpFree — RDP/SSH 6 Jam
 
-'on':
+on:
   workflow_dispatch:
     inputs:
       durasi_menit:
-        description: Durasi sesi dalam menit
+        description: Durasi sesi dalam menit. 6 jam = 360
         required: false
-        default: '360'
+        default: "360"
         type: choice
-        options:
-          - '15'
-          - '30'
-          - '60'
-          - '120'
-          - '180'
-          - '240'
-          - '300'
-          - '330'
-          - '360'
+        options: ["15", "30", "60", "120", "180", "240", "300", "330", "360"]
 
       hostname:
         description: Hostname sesi
@@ -26,44 +18,53 @@ name: RdpFree — Windows/Linux RDP
         type: string
 
       rdp_user:
-        description: Username login
+        description: Username Linux/RDP/SSH
         required: false
         default: xyadmin
         type: string
 
       akses:
-        description: Metode akses
+        description: Akses Tailscale privat
         required: false
         default: tailscale
         type: choice
         options:
           - tailscale
-          - portmap
 
       runner:
-        description: Pilih OS runner
-        required: true
-        default: windows-2022
+        description: Sistem operasi runner
+        required: false
+        default: ubuntu-24.04
         type: choice
         options:
+          - ubuntu-24.04
+          - ubuntu-22.04
           - windows-2022
           - windows-2025
           - windows-latest
-          - ubuntu-24.04
-          - ubuntu-22.04
-          - ubuntu-latest
 
-      xydesk:
-        description: Setup XyDesk hanya untuk Windows
+      desktop:
+        description: Desktop Linux
         required: false
-        default: ya
+        default: xfce
         type: choice
         options:
-          - ya
+          - xfce
+          - mate
+          - lxde
           - tidak
 
       microphone:
-        description: Aktifkan mikrofon
+        description: Izinkan mikrofon melalui RDP
+        required: false
+        default: tidak
+        type: choice
+        options:
+          - ya
+          - tidak
+
+      ssh:
+        description: Aktifkan SSH
         required: false
         default: ya
         type: choice
@@ -71,99 +72,14 @@ name: RdpFree — Windows/Linux RDP
           - ya
           - tidak
 
-      storage_boost:
-        description: Storage boost hanya untuk Windows
+      xrdp:
+        description: Aktifkan koneksi RDP pada Linux
         required: false
-        default: tidak
+        default: ya
         type: choice
         options:
           - ya
           - tidak
-
-      debloat:
-        description: Debloat hanya untuk Windows
-        required: false
-        default: ringan
-        type: choice
-        options:
-          - ringan
-          - full
-          - tidak
-
-      samp:
-        description: Dependensi SAMP hanya untuk Windows
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      win10:
-        description: Tweak Windows
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      ekstra:
-        description: Ekstra Windows
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      grafis:
-        description: GPU software Windows
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - software
-          - tidak
-
-      roblox:
-        description: Cek kompatibilitas Roblox
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      minecraft_java:
-        description: Cek Minecraft Java
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      minecraft_bedrock:
-        description: Cek Minecraft Bedrock
-        required: false
-        default: tidak
-        type: choice
-        options:
-          - ya
-          - tidak
-
-      portmap_host:
-        description: Host Portmap
-        required: false
-        default: ''
-        type: string
-
-      portmap_port:
-        description: Port Portmap
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
@@ -174,8 +90,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  rdp-windows:
-    if: startsWith(inputs.runner, 'windows')
+  linux:
+    name: Linux RDP/SSH
+    if: startsWith(inputs.runner, 'ubuntu-')
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
 
@@ -183,218 +100,437 @@ jobs:
       DUR: ${{ inputs.durasi_menit }}
       HOSTNAME: ${{ inputs.hostname }}
       RDP_USER: ${{ inputs.rdp_user }}
-      AKSES: ${{ inputs.akses }}
-      XYDESK: ${{ inputs.xydesk }}
-      WIN10: ${{ inputs.win10 }}
-      EXTRAS: ${{ inputs.ekstra }}
-      GRAFIS: ${{ inputs.grafis }}
-      STORAGE_BOOST: ${{ inputs.storage_boost }}
-      DEBLOAT: ${{ inputs.debloat }}
-      SAMP: ${{ inputs.samp }}
+      DESKTOP: ${{ inputs.desktop }}
       MICROPHONE: ${{ inputs.microphone }}
-      ROBLOX: ${{ inputs.roblox }}
-      MINECRAFT_JAVA: ${{ inputs.minecraft_java }}
-      MINECRAFT_BEDROCK: ${{ inputs.minecraft_bedrock }}
-      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
-      PORTMAP_HOST: ${{ inputs.portmap_host || vars.PORTMAP_HOST }}
-      PORTMAP_PORT: ${{ inputs.portmap_port || vars.PORTMAP_PORT }}
+      ENABLE_SSH: ${{ inputs.ssh }}
+      ENABLE_XRDP: ${{ inputs.xrdp }}
+      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Info lingkungan Windows
-        shell: pwsh
+      - name: Informasi runner Linux
+        shell: bash
         run: |
-          $os = Get-CimInstance Win32_OperatingSystem
-          Write-Host "OS: $($os.Caption)"
-          Write-Host "Version: $($os.Version)"
-          Get-CimInstance Win32_LogicalDisk |
-            ForEach-Object {
-              Write-Host "$($_.DeviceID): $([math]::Round($_.FreeSpace / 1GB, 1)) GB free"
-            }
+          set -e
+          echo "[RdpFree] OS:"
+          uname -a
+          echo "[RdpFree] Hostname: $HOSTNAME"
+          echo "[RdpFree] User: $RDP_USER"
+          echo "[RdpFree] Disk:"
+          df -h
 
-      - name: Setup dasar Windows RDP
-        shell: pwsh
-        run: ./scripts/setup-rdp.ps1
+      - name: Install Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
+          statedir: /tmp/tailscale-state
 
-      - name: Setup XyDesk Windows
-        if: ${{ inputs.xydesk == 'ya' }}
-        shell: pwsh
-        run: ./scripts/setup-xydesk.ps1
+      - name: Tailscale hostname
+        shell: bash
+        run: |
+          set -e
 
-      - name: Setup Tailscale Windows
-        if: ${{ inputs.akses == 'tailscale' }}
-        shell: pwsh
-        run: ./scripts/setup-akses.ps1
+          if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+            echo "::error::Secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY belum dibuat."
+            exit 1
+          fi
 
-      - name: Setup Portmap Windows
-        if: ${{ inputs.akses == 'portmap' }}
-        shell: pwsh
+          sudo tailscale set --hostname="${HOSTNAME}" || \
+          sudo tailscale up \
+            --auth-key="$TAILSCALE_AUTH_KEY" \
+            --hostname="${HOSTNAME}" \
+            --accept-routes=false \
+            --accept-dns=true
+
+          echo "[RdpFree] Tailscale status:"
+          tailscale status
+
+          TS_IP="$(tailscale ip -4 | head -n 1)"
+          echo "TAILSCALE_IP=$TS_IP" >> "$GITHUB_ENV"
+
+      - name: Setup user Linux
+        shell: bash
+        run: |
+          set -e
+
+          if ! [[ "$RDP_USER" =~ ^[a-zA-Z0-9_-]{3,20}$ ]]; then
+            echo "::error::Nama user hanya boleh berisi huruf, angka, _ atau - dengan panjang 3-20 karakter."
+            exit 1
+          fi
+
+          if ! id "$RDP_USER" >/dev/null 2>&1; then
+            sudo useradd -m -s /bin/bash "$RDP_USER"
+          fi
+
+          sudo usermod -aG sudo "$RDP_USER"
+
+          if [ -n "${{ secrets.RDP_PASSWORD }}" ]; then
+            echo "${RDP_USER}:${{ secrets.RDP_PASSWORD }}" | sudo chpasswd
+          else
+            echo "::error::Secret RDP_PASSWORD belum dibuat."
+            exit 1
+          fi
+
+          sudo mkdir -p "/home/$RDP_USER"
+          sudo chown -R "$RDP_USER:$RDP_USER" "/home/$RDP_USER"
+
+      - name: Install desktop XFCE
+        if: ${{ inputs.desktop == 'xfce' }}
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            xfce4 \
+            xfce4-goodies \
+            dbus-x11 \
+            x11-xserver-utils
+
+      - name: Install desktop MATE
+        if: ${{ inputs.desktop == 'mate' }}
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ubuntu-mate-desktop \
+            dbus-x11
+
+      - name: Install desktop LXDE
+        if: ${{ inputs.desktop == 'lxde' }}
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            lxde \
+            dbus-x11
+
+      - name: Configure desktop session
+        if: ${{ inputs.desktop != 'tidak' }}
+        shell: bash
+        run: |
+          set -e
+
+          case "$DESKTOP" in
+            xfce)
+              SESSION="startxfce4"
+              ;;
+            mate)
+              SESSION="mate-session"
+              ;;
+            lxde)
+              SESSION="startlxde"
+              ;;
+            *)
+              SESSION="startxfce4"
+              ;;
+          esac
+
+          sudo tee "/home/$RDP_USER/.xsession" >/dev/null <<EOF
+          #!/bin/sh
+          export LANG=C.UTF-8
+          export LC_ALL=C.UTF-8
+          exec $SESSION
+          EOF
+
+          sudo chmod +x "/home/$RDP_USER/.xsession"
+          sudo chown "$RDP_USER:$RDP_USER" "/home/$RDP_USER/.xsession"
+
+      - name: Install and configure XRDP
+        if: ${{ inputs.xrdp == 'ya' && inputs.desktop != 'tidak' }}
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            xrdp \
+            xorgxrdp \
+            dbus-x11
+
+          sudo adduser xrdp ssl-cert || true
+
+          sudo sed -i 's/^new_cursors=true/new_cursors=false/' /etc/xrdp/xrdp.ini || true
+          sudo systemctl enable xrdp
+          sudo systemctl restart xrdp
+
+          if command -v ufw >/dev/null 2>&1; then
+            sudo ufw allow from 100.64.0.0/10 to any port 3389 proto tcp || true
+          fi
+
+      - name: Install and configure SSH
+        if: ${{ inputs.ssh == 'ya' }}
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+
+          sudo mkdir -p /run/sshd
+          sudo systemctl enable ssh
+          sudo systemctl restart ssh
+
+          if command -v ufw >/dev/null 2>&1; then
+            sudo ufw allow from 100.64.0.0/10 to any port 22 proto tcp || true
+          fi
+
+      - name: Setup audio dan mikrofon
+        if: ${{ inputs.microphone == 'ya' && inputs.desktop != 'tidak' }}
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            pulseaudio \
+            pulseaudio-utils \
+            alsa-utils
+
+          sudo usermod -aG audio "$RDP_USER" || true
+
+      - name: Publish koneksi Linux
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p out
+
+          cat > out/rdp-status.json <<EOF
+          {
+            "active": true,
+            "platform": "linux",
+            "hostname": "$HOSTNAME",
+            "username": "$RDP_USER",
+            "tailscale": {
+              "ip": "$TAILSCALE_IP",
+              "rdp_port": 3389,
+              "ssh_port": 22
+            },
+            "desktop": "$DESKTOP",
+            "xrdp": "$ENABLE_XRDP",
+            "ssh": "$ENABLE_SSH",
+            "duration_minutes": "$DUR"
+          }
+          EOF
+
+          echo "========================================"
+          echo "LINUX SESI SIAP"
+          echo "========================================"
+          echo "RDP   : $TAILSCALE_IP:3389"
+          echo "SSH   : $RDP_USER@$TAILSCALE_IP"
+          echo "User  : $RDP_USER"
+          echo "Pass  : gunakan secret RDP_PASSWORD"
+          echo "Desktop: $DESKTOP"
+          echo "========================================"
+
+      - name: Publish status
+        shell: bash
         env:
-          PORTMAP_OVPN_CONFIG: ${{ secrets.PORTMAP_OVPN_CONFIG }}
-        run: ./scripts/setup-portmap.ps1
-
-      - name: Setup media Windows
-        shell: pwsh
-        run: ./scripts/setup-media.ps1
-
-      - name: Storage boost Windows
-        if: ${{ inputs.storage_boost == 'ya' }}
-        continue-on-error: true
-        shell: pwsh
-        run: ./scripts/optimize-storage.ps1
-
-      - name: Tweak Windows
-        if: ${{ inputs.win10 == 'ya' }}
-        shell: pwsh
-        run: ./scripts/setup-win10.ps1
-
-      - name: Setup grafis Windows
-        if: ${{ inputs.grafis == 'software' }}
-        continue-on-error: true
-        shell: pwsh
-        run: ./scripts/setup-grafis.ps1
-
-      - name: Setup ekstra Windows
-        if: ${{ inputs.ekstra == 'ya' }}
-        continue-on-error: true
-        shell: pwsh
-        run: ./scripts/setup-extras.ps1
-
-      - name: Setup SAMP Windows
-        if: ${{ inputs.samp == 'ya' }}
-        continue-on-error: true
-        shell: pwsh
-        run: ./scripts/setup-samp.ps1
-
-      - name: Setup game Windows
-        shell: pwsh
-        run: ./scripts/setup-games.ps1
-
-      - name: Publish Windows aktif
-        shell: pwsh
-        run: ./scripts/publish-status.ps1 -Active $true
-
-      - name: Keepalive Windows
-        shell: pwsh
-        run: ./scripts/keepalive.ps1
-
-      - name: Finalize Windows
-        if: always()
-        continue-on-error: true
-        shell: pwsh
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/publish-status.ps1 -Active $false
-          ./scripts/finalize-rdp.ps1
-          ./scripts/cleanup-actions.ps1
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-  rdp-linux:
-    if: startsWith(inputs.runner, 'ubuntu')
+          git add out/rdp-status.json
+          git commit -m "Update Linux RDP status" || true
+          git push origin HEAD:status --force || true
+
+      - name: Sesi aktif
+        shell: bash
+        run: |
+          set -e
+          END_TIME=$(( $(date +%s) + DUR * 60 ))
+
+          while [ "$(date +%s)" -lt "$END_TIME" ]; do
+            echo "[RdpFree] Sesi aktif - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            sleep 60
+          done
+
+      - name: Finalize Linux
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          sudo systemctl stop xrdp 2>/dev/null || true
+          sudo systemctl stop ssh 2>/dev/null || true
+          sudo tailscale logout 2>/dev/null || true
+
+          mkdir -p out
+
+          cat > out/rdp-status.json <<EOF
+          {
+            "active": false,
+            "platform": "linux",
+            "hostname": "$HOSTNAME",
+            "message": "Sesi Linux telah selesai."
+          }
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add out/rdp-status.json
+          git commit -m "Finalize Linux RDP session" || true
+          git push origin HEAD:status --force || true
+
+  windows:
+    name: Windows RDP
+    if: startsWith(inputs.runner, 'windows-')
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
 
     env:
       DUR: ${{ inputs.durasi_menit }}
       HOSTNAME: ${{ inputs.hostname }}
-      RDP_USER: ${{ inputs.rdp_user }}
-      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      RDP_USER: ${{ inputs.rdp_user || 'xyadmin' }}
+      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
 
     steps:
-      - name: Info lingkungan Linux
-        shell: bash
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Informasi Windows runner
+        shell: pwsh
         run: |
-          uname -a
-          lsb_release -a || true
-          df -h
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "[RdpFree] OS: $($os.Caption) build $($os.Version)"
+          Write-Host "[RdpFree] Hostname: $env:HOSTNAME"
 
-      - name: Install desktop dan XRDP
-        shell: bash
+      - name: Setup dasar Windows
+        shell: pwsh
         run: |
-          sudo apt-get update
+          if (-not $env:RDP_PASSWORD) {
+            throw "Secret RDP_PASSWORD belum dibuat."
+          }
 
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xrdp \
-            xfce4 \
-            xfce4-goodies \
-            dbus-x11 \
-            curl
+          if ($env:RDP_USER -notmatch '^[a-zA-Z0-9_-]{3,20}$') {
+            throw "Nama user tidak valid."
+          }
 
-          echo "startxfce4" | sudo tee /etc/skel/.xsession
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
+          $securePassword = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
 
-      - name: Buat user Linux
-        shell: bash
+          if (-not (Get-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue)) {
+            New-LocalUser `
+              -Name $env:RDP_USER `
+              -Password $securePassword `
+              -AccountNeverExpires `
+              -PasswordNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member $env:RDP_USER -ErrorAction SilentlyContinue
+
+          Set-ItemProperty `
+            -Path "HKLM:SystemCurrentControlSetControlTerminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+      - name: Connect Tailscale Windows
+        shell: pwsh
         run: |
-          if [[ ! "$RDP_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]{2,19}$ ]]; then
-            echo "Username tidak valid."
-            exit 1
-          fi
+          $ts = "$env:ProgramFilesTailscale\tailscale.exe"
 
-          if id "$RDP_USER" >/dev/null 2>&1; then
-            sudo userdel -r "$RDP_USER" || true
-          fi
+          if (-not (Test-Path $ts)) {
+            $installer = "$env:TEMP\tailscale-setup.exe"
+            Invoke-WebRequest `
+              -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
+              -OutFile $installer
 
-          PASSWORD="$(tr -dc 'A-Za-z0-9!@#%+=' </dev/urandom | head -c 20)"
+            Start-Process `
+              -FilePath $installer `
+              -ArgumentList "/quiet" `
+              -Wait
 
-          sudo useradd -m -s /bin/bash "$RDP_USER"
-          echo "$RDP_USER:$PASSWORD" | sudo chpasswd
-          sudo usermod -aG sudo "$RDP_USER"
+            Start-Sleep -Seconds 10
+          }
 
-          echo "::add-mask::$PASSWORD"
-          echo "LINUX_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+          if (-not $env:TAILSCALE_AUTH_KEY) {
+            throw "Secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY belum dibuat."
+          }
 
-      - name: Install Tailscale Linux
-        shell: bash
+          & $ts up `
+            --auth-key="$env:TAILSCALE_AUTH_KEY" `
+            --hostname="$env:HOSTNAME" `
+            --accept-dns=true
+
+          $ip = (& $ts ip -4 | Select-Object -First 1).Trim()
+          "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Status Windows
+        shell: pwsh
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
+          New-Item -ItemType Directory -Force -Path out | Out-Null
 
-          sudo tailscale up \
-            --auth-key="$TAILSCALE_AUTH_KEY" \
-            --hostname="linux-rdp-${GITHUB_RUN_ID}"
+          @"
+          {
+            "active": true,
+            "platform": "windows",
+            "hostname": "$env:HOSTNAME",
+            "username": "$env:RDP_USER",
+            "tailscale": {
+              "ip": "$env:TAILSCALE_IP",
+              "rdp_port": 3389
+            },
+            "duration_minutes": "$env:DUR"
+          }
+          "@ | Set-Content out/rdp-status.json
 
-          IP="$(sudo tailscale ip -4 | head -n 1)"
+          Write-Host "========================================"
+          Write-Host "WINDOWS SESI SIAP"
+          Write-Host "RDP  : $env:TAILSCALE_IP`:3389"
+          Write-Host "User : $env:RDP_USER"
+          Write-Host "Pass : gunakan secret RDP_PASSWORD"
+          Write-Host "========================================"
 
-          if [[ ! "$IP" =~ ^[0-9]+.[0-9]+.[0-9]+.[0-9]+$ ]]; then
-            echo "IP Tailscale tidak ditemukan."
-            exit 1
-          fi
-
-          echo "::add-mask::$IP"
-          echo "LINUX_IP=$IP" >> "$GITHUB_ENV"
-
-      - name: Kirim akses Linux ke Telegram
-        shell: bash
+      - name: Publish status Windows
+        shell: pwsh
         env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          MESSAGE="Linux RDP AKTIF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add out/rdp-status.json
+          git commit -m "Update Windows RDP status" || $true
+          git push origin HEAD:status --force
 
-          OS: ${{ inputs.runner }}
-          IP: $LINUX_IP
-          Username: $RDP_USER
-          Password: $LINUX_PASSWORD
-          Port: 3389"
-
-          curl -fsS -X POST \
-            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=${MESSAGE}"
-
-      - name: Keepalive Linux
-        shell: bash
+      - name: Sesi Windows aktif
+        shell: pwsh
         run: |
-          while true; do
-            sleep 300
-          done
+          $end = (Get-Date).AddMinutes([int]$env:DUR)
 
-      - name: Finalize Linux
+          while ((Get-Date) -lt $end) {
+            Write-Host "[RdpFree] Sesi aktif - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            Start-Sleep -Seconds 60
+          }
+
+      - name: Finalize Windows
         if: always()
-        continue-on-error: true
-        shell: bash
+        shell: pwsh
         run: |
-          sudo systemctl stop xrdp || true
-          sudo tailscale logout || true
+          $ts = "$env:ProgramFilesTailscale\tailscale.exe"
+          if (Test-Path $ts) {
+            & $ts logout
+          }
+
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+
+          @"
+          {
+            "active": false,
+            "platform": "windows",
+            "hostname": "$env:HOSTNAME",
+            "message": "Sesi Windows telah selesai."
+          }
+          "@ | Set-Content out/rdp-status.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add out/rdp-status.json
+          git commit -m "Finalize Windows RDP session" || $true
+          git push origin HEAD:status --force
