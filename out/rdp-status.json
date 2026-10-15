@@ -1,16 +1,6 @@
 {
-  "active": true,
+  "active": false,
   "platform": "linux",
   "hostname": "rdpfree",
-  "username": "xyadmin",
-  "desktop": "xfce",
-  "xrdp": "ya",
-  "ssh": "ya",
-  "microphone": "ya",
-  "duration_minutes": "360",
-  "tailscale": {
-    "ip": "100.87.180.29",
-    "rdp": "100.87.180.29:3389",
-    "ssh": "100.87.180.29:22"
-  }
+  "message": "Sesi Linux telah selesai."
 }
