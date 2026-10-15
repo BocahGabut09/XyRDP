@@ -1,35 +1,37 @@
 # .github/workflows/rdpfree.yml
-name: RdpFree — RDP/SSH 6 Jam
+
+name: RdpFree — Linux/Windows Tailscale
 
 on:
   workflow_dispatch:
     inputs:
       durasi_menit:
-        description: Durasi sesi dalam menit. 6 jam = 360
+        description: Durasi sesi dalam menit
         required: false
         default: "360"
         type: choice
-        options: ["15", "30", "60", "120", "180", "240", "300", "330", "360"]
+        options:
+          - "15"
+          - "30"
+          - "60"
+          - "120"
+          - "180"
+          - "240"
+          - "300"
+          - "330"
+          - "360"
 
       hostname:
-        description: Hostname sesi
+        description: Hostname Tailscale
         required: false
         default: rdpfree
         type: string
 
       rdp_user:
-        description: Username Linux/RDP/SSH
+        description: Username login
         required: false
         default: xyadmin
         type: string
-
-      akses:
-        description: Akses Tailscale privat
-        required: false
-        default: tailscale
-        type: choice
-        options:
-          - tailscale
 
       runner:
         description: Sistem operasi runner
@@ -54,10 +56,10 @@ on:
           - lxde
           - tidak
 
-      microphone:
-        description: Izinkan mikrofon melalui RDP
+      xrdp:
+        description: Aktifkan XRDP Linux
         required: false
-        default: tidak
+        default: ya
         type: choice
         options:
           - ya
@@ -72,8 +74,8 @@ on:
           - ya
           - tidak
 
-      xrdp:
-        description: Aktifkan koneksi RDP pada Linux
+      microphone:
+        description: Aktifkan audio/mikrofon Linux
         required: false
         default: ya
         type: choice
@@ -91,92 +93,108 @@ concurrency:
 
 jobs:
   linux:
-    name: Linux RDP/SSH
+    name: Linux Tailscale RDP/SSH
     if: startsWith(inputs.runner, 'ubuntu-')
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
 
     env:
       DUR: ${{ inputs.durasi_menit }}
-      HOSTNAME: ${{ inputs.hostname }}
+      SESSION_HOSTNAME: ${{ inputs.hostname }}
       RDP_USER: ${{ inputs.rdp_user }}
       DESKTOP: ${{ inputs.desktop }}
-      MICROPHONE: ${{ inputs.microphone }}
-      ENABLE_SSH: ${{ inputs.ssh }}
       ENABLE_XRDP: ${{ inputs.xrdp }}
+      ENABLE_SSH: ${{ inputs.ssh }}
+      MICROPHONE: ${{ inputs.microphone }}
       TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
+      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Informasi runner Linux
+      - name: Cek environment Linux
         shell: bash
         run: |
           set -e
-          echo "[RdpFree] OS:"
+          echo "OS:"
           uname -a
-          echo "[RdpFree] Hostname: $HOSTNAME"
-          echo "[RdpFree] User: $RDP_USER"
-          echo "[RdpFree] Disk:"
+          echo "Disk:"
           df -h
+          echo "Runner: $RUNNER_NAME"
 
-      - name: Install Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
-          statedir: /tmp/tailscale-state
-
-      - name: Tailscale hostname
+      - name: Validasi secret
         shell: bash
         run: |
           set -e
 
           if [ -z "$TAILSCALE_AUTH_KEY" ]; then
-            echo "::error::Secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY belum dibuat."
+            echo "::error::Buat secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY."
             exit 1
           fi
 
-          sudo tailscale set --hostname="${HOSTNAME}" || \
-          sudo tailscale up \
-            --auth-key="$TAILSCALE_AUTH_KEY" \
-            --hostname="${HOSTNAME}" \
-            --accept-routes=false \
-            --accept-dns=true
+          if [ -z "$RDP_PASSWORD" ]; then
+            echo "::error::Buat secret RDP_PASSWORD."
+            exit 1
+          fi
 
-          echo "[RdpFree] Tailscale status:"
-          tailscale status
+          if ! [[ "$RDP_USER" =~ ^[a-zA-Z0-9_-]{3,20}$ ]]; then
+            echo "::error::Username harus 3-20 karakter: huruf, angka, _ atau -."
+            exit 1
+          fi
 
-          TS_IP="$(tailscale ip -4 | head -n 1)"
-          echo "TAILSCALE_IP=$TS_IP" >> "$GITHUB_ENV"
+      - name: Install dan connect Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
+          statedir: /tmp/tailscale-state
 
-      - name: Setup user Linux
+      - name: Set hostname Tailscale
         shell: bash
         run: |
           set -e
 
-          if ! [[ "$RDP_USER" =~ ^[a-zA-Z0-9_-]{3,20}$ ]]; then
-            echo "::error::Nama user hanya boleh berisi huruf, angka, _ atau - dengan panjang 3-20 karakter."
+          sudo tailscale set \
+            --hostname="$SESSION_HOSTNAME" \
+            --accept-dns=true || \
+          sudo tailscale up \
+            --auth-key="$TAILSCALE_AUTH_KEY" \
+            --hostname="$SESSION_HOSTNAME" \
+            --accept-dns=true \
+            --accept-routes=false
+
+          sleep 3
+
+          TAILSCALE_IP="$(sudo tailscale ip -4 | head -n 1)"
+
+          if [ -z "$TAILSCALE_IP" ]; then
+            echo "::error::IP Tailscale tidak ditemukan."
+            sudo tailscale status
             exit 1
           fi
+
+          echo "TAILSCALE_IP=$TAILSCALE_IP" >> "$GITHUB_ENV"
+          sudo tailscale status
+
+      - name: Buat user Linux
+        shell: bash
+        run: |
+          set -e
 
           if ! id "$RDP_USER" >/dev/null 2>&1; then
-            sudo useradd -m -s /bin/bash "$RDP_USER"
+            sudo useradd \
+              --create-home \
+              --shell /bin/bash \
+              "$RDP_USER"
           fi
 
+          echo "$RDP_USER:$RDP_PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo "$RDP_USER"
-
-          if [ -n "${{ secrets.RDP_PASSWORD }}" ]; then
-            echo "${RDP_USER}:${{ secrets.RDP_PASSWORD }}" | sudo chpasswd
-          else
-            echo "::error::Secret RDP_PASSWORD belum dibuat."
-            exit 1
-          fi
 
           sudo mkdir -p "/home/$RDP_USER"
           sudo chown -R "$RDP_USER:$RDP_USER" "/home/$RDP_USER"
 
-      - name: Install desktop XFCE
+      - name: Install XFCE
         if: ${{ inputs.desktop == 'xfce' }}
         shell: bash
         run: |
@@ -186,9 +204,9 @@ jobs:
             xfce4 \
             xfce4-goodies \
             dbus-x11 \
-            x11-xserver-utils
+            xorgxrdp
 
-      - name: Install desktop MATE
+      - name: Install MATE
         if: ${{ inputs.desktop == 'mate' }}
         shell: bash
         run: |
@@ -196,9 +214,10 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             ubuntu-mate-desktop \
-            dbus-x11
+            dbus-x11 \
+            xorgxrdp
 
-      - name: Install desktop LXDE
+      - name: Install LXDE
         if: ${{ inputs.desktop == 'lxde' }}
         shell: bash
         run: |
@@ -206,9 +225,10 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             lxde \
-            dbus-x11
+            dbus-x11 \
+            xorgxrdp
 
-      - name: Configure desktop session
+      - name: Konfigurasi desktop session
         if: ${{ inputs.desktop != 'tidak' }}
         shell: bash
         run: |
@@ -216,30 +236,31 @@ jobs:
 
           case "$DESKTOP" in
             xfce)
-              SESSION="startxfce4"
+              START_SESSION="startxfce4"
               ;;
             mate)
-              SESSION="mate-session"
+              START_SESSION="mate-session"
               ;;
             lxde)
-              SESSION="startlxde"
+              START_SESSION="startlxde"
               ;;
             *)
-              SESSION="startxfce4"
+              START_SESSION="startxfce4"
               ;;
           esac
 
-          sudo tee "/home/$RDP_USER/.xsession" >/dev/null <<EOF
+          sudo tee "/home/$RDP_USER/.xsession" > /dev/null <<EOF
           #!/bin/sh
           export LANG=C.UTF-8
           export LC_ALL=C.UTF-8
-          exec $SESSION
+          export XDG_CURRENT_DESKTOP=$DESKTOP
+          exec $START_SESSION
           EOF
 
           sudo chmod +x "/home/$RDP_USER/.xsession"
           sudo chown "$RDP_USER:$RDP_USER" "/home/$RDP_USER/.xsession"
 
-      - name: Install and configure XRDP
+      - name: Install dan konfigurasi XRDP
         if: ${{ inputs.xrdp == 'ya' && inputs.desktop != 'tidak' }}
         shell: bash
         run: |
@@ -253,7 +274,10 @@ jobs:
 
           sudo adduser xrdp ssl-cert || true
 
-          sudo sed -i 's/^new_cursors=true/new_cursors=false/' /etc/xrdp/xrdp.ini || true
+          sudo sed -i \
+            's/^new_cursors=true/new_cursors=false/' \
+            /etc/xrdp/xrdp.ini || true
+
           sudo systemctl enable xrdp
           sudo systemctl restart xrdp
 
@@ -261,14 +285,15 @@ jobs:
             sudo ufw allow from 100.64.0.0/10 to any port 3389 proto tcp || true
           fi
 
-      - name: Install and configure SSH
+      - name: Install dan konfigurasi SSH
         if: ${{ inputs.ssh == 'ya' }}
         shell: bash
         run: |
           set -e
 
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            openssh-server
 
           sudo mkdir -p /run/sshd
           sudo systemctl enable ssh
@@ -278,11 +303,12 @@ jobs:
             sudo ufw allow from 100.64.0.0/10 to any port 22 proto tcp || true
           fi
 
-      - name: Setup audio dan mikrofon
+      - name: Install audio dan mikrofon
         if: ${{ inputs.microphone == 'ya' && inputs.desktop != 'tidak' }}
         shell: bash
         run: |
           set -e
+
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             pulseaudio \
@@ -291,7 +317,7 @@ jobs:
 
           sudo usermod -aG audio "$RDP_USER" || true
 
-      - name: Publish koneksi Linux
+      - name: Buat status koneksi Linux
         shell: bash
         run: |
           set -e
@@ -302,47 +328,55 @@ jobs:
           {
             "active": true,
             "platform": "linux",
-            "hostname": "$HOSTNAME",
+            "hostname": "$SESSION_HOSTNAME",
             "username": "$RDP_USER",
-            "tailscale": {
-              "ip": "$TAILSCALE_IP",
-              "rdp_port": 3389,
-              "ssh_port": 22
-            },
             "desktop": "$DESKTOP",
             "xrdp": "$ENABLE_XRDP",
             "ssh": "$ENABLE_SSH",
-            "duration_minutes": "$DUR"
+            "microphone": "$MICROPHONE",
+            "duration_minutes": "$DUR",
+            "tailscale": {
+              "ip": "$TAILSCALE_IP",
+              "rdp": "$TAILSCALE_IP:3389",
+              "ssh": "$TAILSCALE_IP:22"
+            }
           }
           EOF
 
           echo "========================================"
           echo "LINUX SESI SIAP"
           echo "========================================"
-          echo "RDP   : $TAILSCALE_IP:3389"
-          echo "SSH   : $RDP_USER@$TAILSCALE_IP"
-          echo "User  : $RDP_USER"
-          echo "Pass  : gunakan secret RDP_PASSWORD"
-          echo "Desktop: $DESKTOP"
+          echo "RDP      : $TAILSCALE_IP:3389"
+          echo "SSH      : $RDP_USER@$TAILSCALE_IP"
+          echo "Username : $RDP_USER"
+          echo "Password : gunakan secret RDP_PASSWORD"
+          echo "Desktop  : $DESKTOP"
           echo "========================================"
 
-      - name: Publish status
+      - name: Publish status Linux
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add out/rdp-status.json
-          git commit -m "Update Linux RDP status" || true
-          git push origin HEAD:status --force || true
+          git add -f out/rdp-status.json
 
-      - name: Sesi aktif
+          if git diff --cached --quiet; then
+            echo "[RdpFree] Tidak ada perubahan status."
+          else
+            git commit -m "Update Linux RDP status"
+            git push origin HEAD:status --force
+          fi
+
+      - name: Sesi Linux aktif
         shell: bash
         run: |
           set -e
+
           END_TIME=$(( $(date +%s) + DUR * 60 ))
 
           while [ "$(date +%s)" -lt "$END_TIME" ]; do
@@ -353,6 +387,8 @@ jobs:
       - name: Finalize Linux
         if: always()
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set +e
 
@@ -366,27 +402,33 @@ jobs:
           {
             "active": false,
             "platform": "linux",
-            "hostname": "$HOSTNAME",
+            "hostname": "$SESSION_HOSTNAME",
             "message": "Sesi Linux telah selesai."
           }
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add out/rdp-status.json
-          git commit -m "Finalize Linux RDP session" || true
-          git push origin HEAD:status --force || true
+
+          git add -f out/rdp-status.json
+
+          if git diff --cached --quiet; then
+            echo "[RdpFree] Status final tidak berubah."
+          else
+            git commit -m "Finalize Linux RDP session"
+            git push origin HEAD:status --force
+          fi
 
   windows:
-    name: Windows RDP
+    name: Windows Tailscale RDP
     if: startsWith(inputs.runner, 'windows-')
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
 
     env:
       DUR: ${{ inputs.durasi_menit }}
-      HOSTNAME: ${{ inputs.hostname }}
-      RDP_USER: ${{ inputs.rdp_user || 'xyadmin' }}
+      SESSION_HOSTNAME: ${{ inputs.hostname }}
+      RDP_USER: ${{ inputs.rdp_user }}
       RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
       TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
 
@@ -394,25 +436,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Informasi Windows runner
-        shell: pwsh
-        run: |
-          $os = Get-CimInstance Win32_OperatingSystem
-          Write-Host "[RdpFree] OS: $($os.Caption) build $($os.Version)"
-          Write-Host "[RdpFree] Hostname: $env:HOSTNAME"
-
-      - name: Setup dasar Windows
+      - name: Validasi secret Windows
         shell: pwsh
         run: |
           if (-not $env:RDP_PASSWORD) {
             throw "Secret RDP_PASSWORD belum dibuat."
           }
 
-          if ($env:RDP_USER -notmatch '^[a-zA-Z0-9_-]{3,20}$') {
-            throw "Nama user tidak valid."
+          if (-not $env:TAILSCALE_AUTH_KEY) {
+            throw "Secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY belum dibuat."
           }
 
-          $securePassword = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
+          if ($env:RDP_USER -notmatch '^[a-zA-Z0-9_-]{3,20}$') {
+            throw "Username tidak valid."
+          }
+
+      - name: Setup Windows user dan RDP
+        shell: pwsh
+        run: |
+          $securePassword = ConvertTo-SecureString `
+            $env:RDP_PASSWORD `
+            -AsPlainText `
+            -Force
 
           if (-not (Get-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue)) {
             New-LocalUser `
@@ -422,22 +467,26 @@ jobs:
               -PasswordNeverExpires
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member $env:RDP_USER -ErrorAction SilentlyContinue
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $env:RDP_USER `
+            -ErrorAction SilentlyContinue
 
           Set-ItemProperty `
             -Path "HKLM:SystemCurrentControlSetControlTerminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
 
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
 
-      - name: Connect Tailscale Windows
+      - name: Install Tailscale Windows
         shell: pwsh
         run: |
-          $ts = "$env:ProgramFilesTailscale\tailscale.exe"
+          $installer = "$env:TEMP\tailscale-setup.exe"
+          $tailscale = "$env:ProgramFilesTailscale\tailscale.exe"
 
-          if (-not (Test-Path $ts)) {
-            $installer = "$env:TEMP\tailscale-setup.exe"
+          if (-not (Test-Path $tailscale)) {
             Invoke-WebRequest `
               -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
               -OutFile $installer
@@ -450,19 +499,26 @@ jobs:
             Start-Sleep -Seconds 10
           }
 
-          if (-not $env:TAILSCALE_AUTH_KEY) {
-            throw "Secret TAILSCALE_AUTHKEY atau TAILSCALE_AUTH_KEY belum dibuat."
-          }
-
-          & $ts up `
+          & $tailscale up `
             --auth-key="$env:TAILSCALE_AUTH_KEY" `
-            --hostname="$env:HOSTNAME" `
+            --hostname="$env:SESSION_HOSTNAME" `
             --accept-dns=true
 
-          $ip = (& $ts ip -4 | Select-Object -First 1).Trim()
-          "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Start-Sleep -Seconds 3
 
-      - name: Status Windows
+          $ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
+
+          if (-not $ip) {
+            throw "IP Tailscale tidak ditemukan."
+          }
+
+          "TAILSCALE_IP=$ip" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Append
+
+          & $tailscale status
+
+      - name: Buat status koneksi Windows
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
@@ -471,21 +527,22 @@ jobs:
           {
             "active": true,
             "platform": "windows",
-            "hostname": "$env:HOSTNAME",
+            "hostname": "$env:SESSION_HOSTNAME",
             "username": "$env:RDP_USER",
+            "duration_minutes": "$env:DUR",
             "tailscale": {
               "ip": "$env:TAILSCALE_IP",
-              "rdp_port": 3389
-            },
-            "duration_minutes": "$env:DUR"
+              "rdp": "$env:TAILSCALE_IP`:3389"
+            }
           }
           "@ | Set-Content out/rdp-status.json
 
           Write-Host "========================================"
           Write-Host "WINDOWS SESI SIAP"
-          Write-Host "RDP  : $env:TAILSCALE_IP`:3389"
-          Write-Host "User : $env:RDP_USER"
-          Write-Host "Pass : gunakan secret RDP_PASSWORD"
+          Write-Host "========================================"
+          Write-Host "RDP      : $env:TAILSCALE_IP`:3389"
+          Write-Host "Username : $env:RDP_USER"
+          Write-Host "Password : gunakan secret RDP_PASSWORD"
           Write-Host "========================================"
 
       - name: Publish status Windows
@@ -493,18 +550,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = "Stop"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add out/rdp-status.json
-          git commit -m "Update Windows RDP status" || $true
-          git push origin HEAD:status --force
+
+          git add -f out/rdp-status.json
+
+          $changed = git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "[RdpFree] Tidak ada perubahan status."
+          } else {
+            git commit -m "Update Windows RDP status"
+            git push origin HEAD:status --force
+          }
 
       - name: Sesi Windows aktif
         shell: pwsh
         run: |
-          $end = (Get-Date).AddMinutes([int]$env:DUR)
+          $endTime = (Get-Date).AddMinutes([int]$env:DUR)
 
-          while ((Get-Date) -lt $end) {
+          while ((Get-Date) -lt $endTime) {
             Write-Host "[RdpFree] Sesi aktif - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
             Start-Sleep -Seconds 60
           }
@@ -512,10 +578,15 @@ jobs:
       - name: Finalize Windows
         if: always()
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $ts = "$env:ProgramFilesTailscale\tailscale.exe"
-          if (Test-Path $ts) {
-            & $ts logout
+          $ErrorActionPreference = "Continue"
+
+          $tailscale = "$env:ProgramFilesTailscale\tailscale.exe"
+
+          if (Test-Path $tailscale) {
+            & $tailscale logout
           }
 
           New-Item -ItemType Directory -Force -Path out | Out-Null
@@ -524,13 +595,21 @@ jobs:
           {
             "active": false,
             "platform": "windows",
-            "hostname": "$env:HOSTNAME",
+            "hostname": "$env:SESSION_HOSTNAME",
             "message": "Sesi Windows telah selesai."
           }
           "@ | Set-Content out/rdp-status.json
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add out/rdp-status.json
-          git commit -m "Finalize Windows RDP session" || $true
-          git push origin HEAD:status --force
+
+          git add -f out/rdp-status.json
+
+          git diff --cached --quiet
+
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "[RdpFree] Status final tidak berubah."
+          } else {
+            git commit -m "Finalize Windows RDP session"
+            git push origin HEAD:status --force
+          }
